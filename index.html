@@ -1,0 +1,746 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Mapa Meteorológico de Moreno</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { height: 100%; width: 100%; background: #0b0f19; font-family: system-ui, -apple-system, sans-serif; overflow: hidden; }
+    #map { height: 100vh; width: 100vw; position: absolute; top: 0; left: 0; }
+    .osm-dark-tiles { filter: invert(100%) hue-rotate(180deg) brightness(95%) contrast(90%); }
+
+    /* Título compacto, centrado en el espacio libre de la izquierda */
+    .top-title-banner {
+      position: absolute; top: 15px; left: calc((100vw - 400px) / 2); transform: translateX(-50%);
+      width: fit-content; display: inline-block; z-index: 1000;
+      background: rgba(15,23,42,.92); backdrop-filter: blur(10px);
+      border: 1px solid rgba(56,189,248,.4); padding: 8px 18px; border-radius: 8px;
+      color: #38bdf8; font-size: 15px; font-weight: 700; letter-spacing: .6px;
+      text-transform: uppercase; box-shadow: 0 6px 20px rgba(0,0,0,.6);
+      white-space: nowrap; pointer-events: none;
+    }
+
+    /* Destello de rayo */
+    #flash-overlay { position: fixed; inset: 0; background: rgba(255,255,255,0); pointer-events: none; z-index: 9999; transition: background .05s ease-out; }
+    .flash-active { background: rgba(255,255,255,.32) !important; }
+
+    .loc-label {
+      background: rgba(15,23,42,.88); border: 1px solid rgba(56,189,248,.5);
+      color: #f1f5f9; padding: 3px 8px; border-radius: 6px; font-size: 11.5px;
+      font-weight: 600; white-space: nowrap; box-shadow: 0 3px 8px rgba(0,0,0,.6);
+      cursor: pointer; transition: all .2s;
+    }
+    .loc-label:hover { background: #0284c7; border-color: #38bdf8; }
+
+    .weather-card {
+      position: absolute; top: 15px; right: 15px; z-index: 1000;
+      background: rgba(15,23,42,.95); backdrop-filter: blur(12px);
+      border: 1px solid rgba(255,255,255,.15); border-radius: 12px;
+      padding: 15px; color: #f8fafc; width: 385px; box-shadow: 0 12px 32px rgba(0,0,0,.8);
+    }
+    .weather-card h3 { font-size: 14px; font-weight: 700; margin-bottom: 8px; color: #38bdf8; display: flex; justify-content: space-between; align-items: center; }
+    .mode-pill { font-size: 10px; padding: 3px 8px; border-radius: 99px; font-weight: 700; text-transform: uppercase; }
+    .pill-now { background: #059669; color: #ecfdf5; }
+    .pill-past { background: #d97706; color: #fffbeb; }
+    .pill-future { background: #7c3aed; color: #f5f3ff; }
+
+    .settings-bar { display: flex; justify-content: space-between; align-items: center; background: rgba(30,41,59,.9); padding: 8px 10px; border-radius: 8px; margin-bottom: 8px; font-size: 11.5px; border: 1px solid rgba(255,255,255,.1); }
+    .settings-bar label { display: flex; align-items: center; gap: 5px; cursor: pointer; font-weight: 600; color: #38bdf8; }
+    .settings-bar input[type=checkbox] { accent-color: #38bdf8; width: 14px; height: 14px; cursor: pointer; }
+
+    .phenomenon-banner { display: flex; align-items: center; gap: 10px; background: linear-gradient(90deg, rgba(30,41,59,.95), rgba(15,23,42,.95)); border: 1px solid rgba(56,189,248,.35); padding: 9px 12px; border-radius: 8px; margin-bottom: 8px; }
+    .phenom-icon { font-size: 24px; }
+    .phenom-text { font-size: 13px; font-weight: 700; color: #f8fafc; }
+    .phenom-sub { font-size: 11px; color: #94a3b8; }
+    .phenom-temp { font-size: 20px; font-weight: 700; color: #f8fafc; white-space: nowrap; padding-left: 12px; border-left: 1px solid rgba(255,255,255,.12); }
+
+    .control-section { background: rgba(30,41,59,.72); border-radius: 8px; padding: 10px; margin-bottom: 8px; border: 1px solid rgba(255,255,255,.08); }
+    .label-row { display: flex; justify-content: space-between; align-items: center; font-size: 12px; color: #cbd5e1; margin-bottom: 4px; }
+    .time-highlight { color: #ffea00; font-weight: 700; font-size: 15px; }
+    input[type=range] { width: 100%; accent-color: #38bdf8; cursor: pointer; margin: 4px 0; }
+    input[type=date] { width: 100%; background: #0f172a; color: #fff; border: 1px solid #334155; padding: 6px 8px; border-radius: 6px; font-size: 12px; margin-bottom: 6px; }
+
+    .quick-nav { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; margin: 6px 0; }
+    .btn-nav { background: #0f172a; color: #cbd5e1; border: 1px solid #334155; padding: 6px 2px; border-radius: 5px; font-size: 11px; cursor: pointer; font-weight: 600; text-align: center; }
+    .btn-nav:hover { background: #1e293b; color: #fff; border-color: #38bdf8; }
+    .btn-nav.btn-now { background: #065f46; color: #a7f3d0; border-color: #10b981; }
+    .btn-seq { background: #1e293b; color: #e2e8f0; border: 1px solid #475569; padding: 7px 10px; border-radius: 6px; font-size: 11.5px; font-weight: 600; cursor: pointer; width: 100%; margin-top: 4px; transition: all .2s; }
+    .btn-seq:hover { background: #334155; border-color: #38bdf8; }
+    .btn-seq.playing { background: #dc2626; border-color: #f87171; color: #fff; }
+
+    .rain-timeline { display: flex; align-items: flex-end; height: 24px; gap: 2px; margin-top: 4px; padding-top: 2px; border-bottom: 1px solid #334155; }
+    .rain-bar { flex: 1; background: #38bdf8; min-height: 2px; border-radius: 2px 2px 0 0; cursor: pointer; opacity: .65; }
+    .rain-bar.selected { opacity: 1; outline: 1px solid #ffea00; }
+
+    .legend-box { margin-top: 8px; padding-top: 6px; border-top: 1px solid rgba(255,255,255,.08); }
+    .legend-bar { height: 8px; width: 100%; border-radius: 4px; margin: 4px 0; background: linear-gradient(90deg, #00e5ff 0%, #00e676 30%, #ffea00 60%, #ff6d00 80%, #ff1744 92%, #d500f9 100%); }
+    .legend-labels { display: flex; justify-content: space-between; font-size: 9.5px; color: #cbd5e1; font-weight: 600; }
+
+    .telemetry-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; margin-top: 4px; }
+    .stat-box { background: #0f172a; padding: 6px; border-radius: 6px; border: 1px solid #1e293b; text-align: center; }
+    .stat-val { font-size: 14px; font-weight: 700; color: #f8fafc; }
+    .stat-lbl { font-size: 9.5px; color: #94a3b8; text-transform: uppercase; }
+  </style>
+</head>
+<body>
+
+<div class="top-title-banner">Mapa Meteorológico de Moreno</div>
+<div id="flash-overlay"></div>
+
+<div class="weather-card">
+  <h3><span>Panel de Control</span><span id="time-mode-pill" class="mode-pill pill-now">● AHORA EN VIVO</span></h3>
+
+  <div class="settings-bar">
+    <label><input type="checkbox" id="chk-anim" checked onchange="toggleAnimState()"> Animación</label>
+    <label><input type="checkbox" id="chk-geojson" checked onchange="toggleGeojsonState()"> 🗺️ Localidades</label>
+    <label><input type="checkbox" id="chk-sound" onchange="toggleSoundState()"> 🔊 Truenos</label>
+  </div>
+
+  <div class="phenomenon-banner">
+    <div id="phenom-icon" class="phenom-icon">🌤️</div>
+    <div style="flex:1;min-width:0">
+      <div id="phenom-title" class="phenom-text">Cargando estado actual...</div>
+      <div id="phenom-sub" class="phenom-sub">Mostrando clima en este momento</div>
+    </div>
+    <div id="phenom-temp" class="phenom-temp">-- °C</div>
+  </div>
+
+  <div class="control-section">
+    <div class="label-row"><span>Fecha:</span></div>
+    <input type="date" id="date-picker">
+    <div class="label-row"><span>Hora seleccionada:</span><span id="hour-label" class="time-highlight">--:-- hs</span></div>
+    <input type="range" id="hour-slider" min="0" max="23" value="12" step="1">
+    <div class="label-row" style="font-size:10px;color:#94a3b8;margin-bottom:0"><span>Lluvia por hora (00h a 23h):</span></div>
+    <div id="rain-timeline" class="rain-timeline"></div>
+    <div class="quick-nav">
+      <button class="btn-nav" onclick="stepHours(-1)">⏪ -1h</button>
+      <button class="btn-nav btn-now" onclick="jumpToNow()">📍 AHORA</button>
+      <button class="btn-nav" onclick="stepHours(1)">+1h ⏩</button>
+      <button class="btn-nav" onclick="jumpToTomorrow()">🔮 Mañana</button>
+    </div>
+    <button id="btn-seq" class="btn-seq" onclick="toggleHourSequence()">▶ Recorrer Horas Automáticamente</button>
+    <div class="legend-box">
+      <div class="label-row" style="margin-bottom:2px"><span>Escala de Lluvia en el Mapa (mm/h):</span></div>
+      <div class="legend-bar"></div>
+      <div class="legend-labels"><span>Llovizna (0.1)</span><span>Moderada (1.5)</span><span>Fuerte (4.0)</span><span>Severa (8+)</span></div>
+    </div>
+  </div>
+
+  <div class="control-section">
+    <div class="label-row"><span id="point-title">📍 Moreno Centro</span></div>
+    <div class="telemetry-grid">
+      <div class="stat-box"><div id="val-rain" class="stat-val">-- mm</div><div class="stat-lbl">Lluvia (mm/h)</div></div>
+      <div class="stat-box"><div id="val-cloud" class="stat-val">-- %</div><div class="stat-lbl">Nubosidad</div></div>
+      <div class="stat-box"><div id="val-wind" class="stat-val">-- km/h</div><div class="stat-lbl">Ráfagas</div></div>
+    </div>
+  </div>
+</div>
+
+<div id="map"></div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+const $ = id => document.getElementById(id);
+const pad = n => String(n).padStart(2, '0');
+const getLocalDateString = d => new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().split('T')[0];
+
+const initialNow = new Date();
+let selectedHour = initialNow.getHours(), isExactNowMode = true;
+let isAnimEnabled = true, isSequencingHours = false, sequenceProgress = 0;
+let isSoundEnabled = false, audioCtx = null, localidadesLayer = null;
+let activeLocIndex = 0;
+
+// Las 6 localidades de Moreno con sub-celdas para que se fundan en un bloque continuo o actúen por separado
+const localidades = [
+  { name: "Moreno Centro",     lat: -34.650, lon: -58.790, weather: null, puffs: [{dLat: 0, dLon: 0, r: 8.0, ph: 0.1}, {dLat: 0.018, dLon: -0.018, r: 7.0, ph: 1.5}] },
+  { name: "Paso del Rey",      lat: -34.656, lon: -58.761, weather: null, puffs: [{dLat: 0, dLon: 0, r: 7.6, ph: 0.8}, {dLat: 0.015, dLon: -0.015, r: 6.6, ph: 2.2}] },
+  { name: "La Reja",           lat: -34.639, lon: -58.828, weather: null, puffs: [{dLat: 0, dLon: 0, r: 8.0, ph: 1.9}, {dLat: 0.020, dLon: 0.015,  r: 7.0, ph: 3.1}] },
+  { name: "Francisco Álvarez", lat: -34.609, lon: -58.869, weather: null, puffs: [{dLat: 0, dLon: 0, r: 8.4, ph: 2.7}, {dLat: 0.018, dLon: 0.025,  r: 7.4, ph: 4.0}] },
+  { name: "Trujui",            lat: -34.588, lon: -58.758, weather: null, puffs: [{dLat: 0, dLon: 0, r: 8.2, ph: 3.6}, {dLat: -0.018, dLon: -0.022, r: 7.2, ph: 5.2}] },
+  { name: "Cuartel V",         lat: -34.539, lon: -58.804, weather: null, puffs: [{dLat: 0, dLon: 0, r: 9.0, ph: 4.5}, {dLat: -0.025, dLon: -0.015, r: 7.8, ph: 0.4}] }
+];
+
+const datePicker = $('date-picker'), hourSlider = $('hour-slider'), hourLabel = $('hour-label');
+const modePill = $('time-mode-pill'), timelineContainer = $('rain-timeline'), btnSeq = $('btn-seq');
+datePicker.value = getLocalDateString(initialNow);
+hourSlider.value = selectedHour;
+
+// Encuadre y zoom exactos desplazados a la izquierda y abajo
+const map = L.map('map', { center: [-34.590, -58.750], zoom: 12.45, minZoom: 9, maxZoom: 17 });
+
+L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { className: 'osm-dark-tiles', attribution: '&copy; OpenStreetMap', maxZoom: 19 }).addTo(map);
+
+fetch('localidades_moreno.geojson')
+  .then(res => { if (!res.ok) throw new Error('No se pudo cargar localidades_moreno.geojson'); return res.json(); })
+  .then(data => {
+    localidadesLayer = L.geoJSON(data, { style: { color: '#38bdf8', weight: 2.2, opacity: 0.9, fill: false, fillOpacity: 0 }, interactive: false });
+    if ($('chk-geojson').checked) localidadesLayer.addTo(map);
+  })
+  .catch(err => console.warn('Aviso GeoJSON:', err));
+
+localidades.forEach((loc, idx) => {
+  const marker = L.marker([loc.lat, loc.lon], {
+    icon: L.divIcon({ className: '', html: `<div class="loc-label">📍 ${loc.name}</div>`, iconAnchor: [40, 10] }),
+    interactive: true
+  }).addTo(map);
+
+  marker.on('click', () => {
+    activeLocIndex = idx;
+    activeMarker.setLatLng([loc.lat, loc.lon]);
+    $('point-title').innerText = `📍 ${loc.name}`;
+    buildTimeline();
+    updateUI();
+  });
+});
+
+const activeMarker = L.circleMarker([localidades[0].lat, localidades[0].lon], {
+  radius: 8, fillColor: '#38bdf8', color: '#ffffff', weight: 2.5, fillOpacity: 1
+}).addTo(map);
+
+// ===================== SONIDO DE TRUENO CON RETRASO FÍSICO (CLAUDE) =====================
+function playThunder(delay = 0) {
+  if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  const ac = audioCtx, sr = ac.sampleRate;
+  if (ac.state === 'suspended') ac.resume();
+  const t0 = ac.currentTime + delay, dur = 5 + Math.random() * 3;
+  const master = ac.createGain();
+  master.gain.value = 0.75;
+  master.connect(ac.destination);
+
+  // Rumor grave profundo con oleadas que decaen
+  const buf = ac.createBuffer(1, Math.floor(sr * dur), sr), d = buf.getChannelData(0);
+  let last = 0;
+  for (let i = 0; i < d.length; i++) { last = (last + 0.1 * (Math.random() * 2 - 1)) / 1.1; d[i] = last * 3.5; }
+  const rumble = ac.createBufferSource();
+  rumble.buffer = buf;
+  const lp = ac.createBiquadFilter();
+  lp.type = 'lowpass';
+  lp.frequency.setValueAtTime(900, t0);
+  lp.frequency.exponentialRampToValueAtTime(140, t0 + dur);
+  const g = ac.createGain();
+  g.gain.setValueAtTime(0.0001, t0);
+  g.gain.exponentialRampToValueAtTime(1, t0 + 0.06);
+  let lvl = 1;
+  for (let tt = t0 + 0.4; tt < t0 + dur - 0.5; tt += 0.3 + Math.random() * 0.6) {
+    lvl *= 0.82;
+    g.gain.exponentialRampToValueAtTime(Math.max(0.03, lvl * (Math.random() < 0.5 ? 0.4 : 1)), tt);
+  }
+  g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+  rumble.connect(lp); lp.connect(g); g.connect(master);
+  rumble.start(t0);
+
+  // Golpe seco inicial ("crac")
+  const nb = ac.createBuffer(1, Math.floor(sr * 0.25), sr), nd = nb.getChannelData(0);
+  for (let i = 0; i < nd.length; i++) nd[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / nd.length, 3);
+  const crack = ac.createBufferSource();
+  crack.buffer = nb;
+  const bp = ac.createBiquadFilter();
+  bp.type = 'bandpass';
+  bp.frequency.value = 700;
+  const cg = ac.createGain();
+  cg.gain.value = 0.55;
+  crack.connect(bp); bp.connect(cg); cg.connect(master);
+  crack.start(t0);
+}
+
+// Primero cae el rayo visual y después llega el sonido del trueno con retraso
+function triggerLightningAndThunder() {
+  const flash = $('flash-overlay');
+  flash.classList.add('flash-active');
+  setTimeout(() => flash.classList.remove('flash-active'), 120);
+  liveCanvas.strike();
+  if (!isSoundEnabled) return;
+  try { playThunder(0.8 + Math.random() * 3.2); } catch (e) { console.error('Audio bloqueado:', e); }
+}
+
+// ===================== MOTOR DE ANIMACIÓN UNIFICADO =====================
+// Viento: partículas con estela larga y suave (estilo Ventusky)
+const windParticles = Array.from({ length: 240 }, () => {
+  const x = Math.random(), y = Math.random();
+  return { x, y, px: x, py: y, speed: 0.7 + Math.random() * 0.5, age: Math.floor(Math.random() * 100), maxAge: 70 + Math.floor(Math.random() * 60) };
+});
+
+// Lluvia: 800 gotas dinámicas con umbral 'u' para que cuando llueva moderado/fuerte se vea una cortina bien abundante
+const rainDrops = Array.from({ length: 800 }, () => ({
+  x: Math.random(),
+  y: Math.random(),
+  v: 0.85 + Math.random() * 0.5,
+  l: 0.75 + Math.random() * 0.55,
+  u: Math.random()
+}));
+
+let nextBolt = 0;
+
+const LiveCanvasLayer = L.Layer.extend({
+  onAdd: function (map) {
+    this._map = map;
+    this._canvas = L.DomUtil.create('canvas', 'leaflet-layer');
+    this._canvas.style.position = 'absolute';
+    this._canvas.style.pointerEvents = 'none';
+    this._canvas.style.zIndex = 450;
+    map.getPanes().overlayPane.appendChild(this._canvas);
+
+    this._trailCanvas = document.createElement('canvas');
+    this._trailCtx = this._trailCanvas.getContext('2d');
+
+    map.on('move zoom resize', this._reset, this);
+    this._reset();
+  },
+  onRemove: function (map) {
+    L.DomUtil.remove(this._canvas);
+    map.off('move zoom resize', this._reset, this);
+  },
+  _reset: function () {
+    const size = this._map.getSize();
+    L.DomUtil.setPosition(this._canvas, this._map.containerPointToLayerPoint([0, 0]));
+    this._canvas.width = size.x;
+    this._canvas.height = size.y;
+    if (this._trailCanvas) {
+      this._trailCanvas.width = size.x;
+      this._trailCanvas.height = size.y;
+      this._trailCtx.clearRect(0, 0, size.x, size.y);
+    }
+  },
+  strike: function () { this._boltPending = true; },
+  render: function (ts) {
+    if (!this._map) return;
+    L.DomUtil.setPosition(this._canvas, this._map.containerPointToLayerPoint([0, 0]));
+
+    const ctx = this._canvas.getContext('2d'), tCtx = this._trailCtx;
+    const W = this._canvas.width, H = this._canvas.height;
+    ctx.clearRect(0, 0, W, H);
+
+    const dt = Math.min(0.05, (ts - (this._tPrev || ts)) / 1000);
+    this._tPrev = ts;
+
+    if (!isAnimEnabled) {
+      tCtx.clearRect(0, 0, W, H);
+      return;
+    }
+
+    const h1 = Math.floor(selectedHour) % 24, h2 = (h1 + 1) % 24;
+    const f = isSequencingHours ? sequenceProgress : 0, tSec = ts * 0.001;
+
+    const cPt = this._map.latLngToContainerPoint([-34.615, -58.800]);
+    const ePt = this._map.latLngToContainerPoint([-34.615, -58.700]);
+    const pxPerKm = Math.max(8, Math.abs(ePt.x - cPt.x) / 9.2);
+
+    let avgWindSpeed = 15, avgWindDir = 180, maxRain = 0, validLocs = 0;
+    const locStates = [];
+
+    localidades.forEach(loc => {
+      if (!loc.weather || !loc.weather.precipitation) return;
+      const rain = (loc.weather.precipitation[h1] || 0) * (1 - f) + (loc.weather.precipitation[h2] || 0) * f;
+      const cloud = (loc.weather.cloud_cover[h1] || 0) * (1 - f) + (loc.weather.cloud_cover[h2] || 0) * f;
+      const wSpeed = loc.weather.wind_gusts_10m[h1] || 15;
+      const wDir = (loc.weather.wind_direction_10m && loc.weather.wind_direction_10m[h1]) || 180;
+
+      avgWindSpeed += wSpeed;
+      avgWindDir += wDir;
+      if (rain > maxRain) maxRain = rain;
+      validLocs++;
+
+      locStates.push({
+        loc, rain, cloud,
+        pt: this._map.latLngToContainerPoint([loc.lat, loc.lon]),
+        rDropPx: 8.2 * pxPerKm
+      });
+    });
+
+    if (validLocs === 0) return;
+    avgWindSpeed /= validLocs;
+    avgWindDir /= validLocs;
+
+    const baseRad = ((avgWindDir + 180) % 360) * (Math.PI / 180);
+    const vxBase = Math.sin(baseRad);
+    const vyBase = -Math.cos(baseRad);
+
+    // 1. NUBES FLUIDAS
+    locStates.forEach((st, idx) => {
+      if (st.cloud > 15) {
+        const alpha = Math.min(0.42, (st.cloud / 100) * 0.38);
+        st.loc.puffs.forEach((p, pIdx) => {
+          const loop = ((tSec * 0.014 + idx * 0.15 + pIdx * 0.3) % 1) - 0.5;
+          const lat = st.loc.lat + p.dLat - Math.cos(baseRad) * loop * 0.08;
+          const lon = st.loc.lon + p.dLon + Math.sin(baseRad) * loop * 0.10;
+          const pt = this._map.latLngToContainerPoint([lat, lon]);
+          const r = p.r * pxPerKm * (1 + Math.sin(tSec + p.ph) * 0.05);
+
+          const g = ctx.createRadialGradient(pt.x, pt.y, r * 0.1, pt.x, pt.y, r);
+          g.addColorStop(0, `rgba(203, 213, 225, ${alpha})`);
+          g.addColorStop(1, 'rgba(100, 116, 139, 0)');
+          ctx.fillStyle = g;
+          ctx.beginPath();
+          ctx.arc(pt.x, pt.y, r, 0, Math.PI * 2);
+          ctx.fill();
+        });
+      }
+    });
+
+    // 2. MANCHAS DE RADAR DE LLUVIA (Solo donde rain >= 0.1 mm/h)
+    locStates.forEach((st, idx) => {
+      if (st.rain < 0.1) return;
+
+      st.loc.puffs.forEach((cell, cIdx) => {
+        const loop = ((tSec * 0.02 + idx * 0.12 + cIdx * 0.25) % 1) - 0.5;
+        const lat = st.loc.lat + cell.dLat * 0.85 - Math.cos(baseRad) * loop * 0.06;
+        const lon = st.loc.lon + cell.dLon * 0.85 + Math.sin(baseRad) * loop * 0.08;
+        const pt = this._map.latLngToContainerPoint([lat, lon]);
+        const rPx = cell.r * pxPerKm * 0.96;
+
+        const grad = ctx.createRadialGradient(pt.x, pt.y, 2, pt.x, pt.y, rPx);
+        if (st.rain < 0.5) {
+          grad.addColorStop(0, 'rgba(0, 229, 255, 0.25)');
+          grad.addColorStop(0.55, 'rgba(0, 230, 118, 0.14)');
+          grad.addColorStop(1, 'rgba(0, 229, 255, 0)');
+        } else if (st.rain >= 8.0) {
+          grad.addColorStop(0, 'rgba(213, 0, 249, 0.58)');
+          grad.addColorStop(0.4, 'rgba(255, 23, 68, 0.48)');
+          grad.addColorStop(0.75, 'rgba(255, 109, 0, 0.30)');
+          grad.addColorStop(1, 'rgba(255, 234, 0, 0)');
+        } else if (st.rain >= 4.0) {
+          grad.addColorStop(0, 'rgba(255, 23, 68, 0.54)');
+          grad.addColorStop(0.45, 'rgba(255, 109, 0, 0.42)');
+          grad.addColorStop(0.8, 'rgba(255, 234, 0, 0.24)');
+          grad.addColorStop(1, 'rgba(0, 230, 118, 0)');
+        } else if (st.rain >= 1.5) {
+          grad.addColorStop(0, 'rgba(255, 234, 0, 0.50)');
+          grad.addColorStop(0.5, 'rgba(0, 230, 118, 0.36)');
+          grad.addColorStop(1, 'rgba(0, 229, 255, 0)');
+        } else {
+          grad.addColorStop(0, 'rgba(0, 230, 118, 0.44)');
+          grad.addColorStop(0.55, 'rgba(0, 229, 255, 0.26)');
+          grad.addColorStop(1, 'rgba(0, 229, 255, 0)');
+        }
+
+        ctx.fillStyle = grad;
+        ctx.beginPath();
+        ctx.arc(pt.x, pt.y, rPx, 0, Math.PI * 2);
+        ctx.fill();
+      });
+    });
+
+    // Disparador inteligente de rayos según intensidad de tormenta
+    if (maxRain < 1.5) nextBolt = 0;
+    else if (!nextBolt) nextBolt = ts + 1800 + Math.random() * 3000;
+    else if (ts > nextBolt) {
+      nextBolt = ts + (maxRain >= 8 ? 3500 + Math.random() * 4500 : maxRain >= 4 ? 6000 + Math.random() * 7000 : 11000 + Math.random() * 12000);
+      triggerLightningAndThunder();
+    }
+
+    // 3. VIENTO CON ESTELA SUAVE (Estilo Ventusky)
+    tCtx.save();
+    tCtx.globalCompositeOperation = 'destination-in';
+    tCtx.fillStyle = 'rgba(0,0,0,0.93)';
+    tCtx.fillRect(0, 0, W, H);
+    tCtx.restore();
+
+    const sc = Math.max(0.0008, avgWindSpeed / 14000);
+    tCtx.lineCap = 'round';
+    tCtx.strokeStyle = maxRain >= 0.5 ? 'rgba(255,255,255,0.48)' : 'rgba(56,189,248,0.52)';
+    tCtx.lineWidth = 1.3;
+    tCtx.beginPath();
+    windParticles.forEach(p => {
+      p.px = p.x; p.py = p.y;
+      const wob = Math.sin(p.x * 10 + p.y * 10 + tSec * 0.6) * 0.28;
+      const localRad = baseRad + wob;
+      p.x += Math.sin(localRad) * sc * p.speed;
+      p.y += -Math.cos(localRad) * sc * p.speed;
+      p.age++;
+      if (p.age > p.maxAge || p.x < 0 || p.x > 1 || p.y < 0 || p.y > 1) {
+        p.x = Math.random(); p.y = Math.random(); p.px = p.x; p.py = p.y; p.age = 0;
+      } else {
+        tCtx.moveTo(p.px * W, p.py * H);
+        tCtx.lineTo(p.x * W, p.y * H);
+      }
+    });
+    tCtx.stroke();
+    ctx.drawImage(this._trailCanvas, 0, 0);
+
+    // 4. LLUVIA Y LLOVIZNA (Sin estela infinita, con 2 cuerpos 'head/tail' y gran densidad en lluvia moderada/fuerte)
+    if (maxRain >= 0.1) {
+      const tail = new Path2D(), head = new Path2D(), mist = new Path2D();
+      const slant = Math.max(-0.45, Math.min(0.45, (vxBase * avgWindSpeed) / 85));
+
+      for (const d of rainDrops) {
+        const px = d.x * W, py = d.y * H;
+
+        // Buscamos cuánta lluvia hay en la posición exacta de esta gota
+        let localRain = 0;
+        for (let k = 0; k < locStates.length; k++) {
+          const st = locStates[k];
+          if (st.rain >= 0.1) {
+            const dist = Math.hypot(px - st.pt.x, py - st.pt.y);
+            if (dist < st.rDropPx && st.rain > localRain) {
+              localRain = st.rain;
+            }
+          }
+        }
+
+        const heavy = localRain >= 0.5;
+        const q = Math.sqrt(Math.min(localRain || maxRain, 10) / 10);
+        const step = (heavy ? 680 + q * 420 : 280) * d.v * dt;
+
+        d.y += step / H;
+        d.x += (step * slant) / W;
+
+        if (d.y > 1.02 || d.x < -0.02 || d.x > 1.02) {
+          d.x = Math.random();
+          d.y = -0.03 * Math.random();
+          continue;
+        }
+
+        if (localRain < 0.1) continue;
+
+        // Cantidad de gotas visibles: poquitas en llovizna, muchísimas en moderada (1.5+) y fuerte (4.0+)
+        const activeQuota = heavy
+          ? (localRain >= 4.0 ? 0.98 : localRain >= 1.5 ? 0.78 : 0.42)
+          : 0.08; // Llovizna: solo el 8% de las gotas activas
+
+        if (d.u > activeQuota) continue;
+
+        const hx = d.x * W, hy = d.y * H;
+        const ln = (heavy ? 9 + q * 14 : 5 + localRain * 6) * d.l;
+
+        if (heavy) {
+          tail.moveTo(hx - slant * ln * 1.9, hy - ln * 1.9);
+          tail.lineTo(hx - slant * ln, hy - ln);
+          head.moveTo(hx - slant * ln, hy - ln);
+          head.lineTo(hx, hy);
+        } else {
+          mist.moveTo(hx - slant * ln, hy - ln);
+          mist.lineTo(hx, hy);
+        }
+      }
+
+      ctx.lineCap = 'round';
+      ctx.strokeStyle = 'rgba(96,165,250,0.34)'; ctx.lineWidth = 1.25; ctx.stroke(tail);
+      ctx.strokeStyle = 'rgba(186,230,253,0.88)'; ctx.lineWidth = 1.65; ctx.stroke(head);
+      ctx.strokeStyle = 'rgba(165,210,255,0.52)'; ctx.lineWidth = 0.95; ctx.stroke(mist);
+    }
+
+    // 5. RAYO QUEBRADO CON RAMA (CLAUDE): Cae exactamente sobre una localidad con tormenta fuerte
+    if (this._boltPending) {
+      this._boltPending = false;
+      const stormyLocs = locStates.filter(s => s.rain >= 1.5);
+      let bx = W * 0.45, by = H * 0.55;
+      if (stormyLocs.length > 0) {
+        const chosen = stormyLocs[Math.floor(Math.random() * stormyLocs.length)];
+        bx = chosen.pt.x + (Math.random() - 0.5) * 110;
+        by = chosen.pt.y + (Math.random() - 0.5) * 90;
+      }
+      const pts = [[bx, 0]];
+      while (pts[pts.length - 1][1] < by) {
+        const [x, y] = pts[pts.length - 1];
+        pts.push([x + (Math.random() - 0.5) * 50, y + 14 + Math.random() * 22]);
+      }
+      const dir = Math.random() < 0.5 ? -1 : 1;
+      const br = [pts[Math.max(1, Math.floor(pts.length * (0.3 + Math.random() * 0.4)))]];
+      for (let i = 0; i < 5; i++) {
+        const [x, y] = br[i];
+        br.push([x + dir * (12 + Math.random() * 22), y + 12 + Math.random() * 16]);
+      }
+      this._bolt = { t0: ts, paths: [pts, br] };
+    }
+
+    if (this._bolt) {
+      const age = ts - this._bolt.t0;
+      if (age > 320) this._bolt = null;
+      else {
+        ctx.save();
+        ctx.globalAlpha = age < 90 ? 1 : age < 140 ? 0.15 : 0.85 * (1 - (age - 140) / 180);
+        ctx.strokeStyle = '#ffffff';
+        ctx.shadowColor = '#93c5fd';
+        ctx.shadowBlur = 18;
+        ctx.lineWidth = 2.4;
+        ctx.lineJoin = 'round';
+        this._bolt.paths.forEach(path => {
+          ctx.beginPath();
+          path.forEach(([x, y], i) => i ? ctx.lineTo(x, y) : ctx.moveTo(x, y));
+          ctx.stroke();
+        });
+        ctx.restore();
+      }
+    }
+  }
+});
+
+const liveCanvas = new LiveCanvasLayer();
+liveCanvas.addTo(map);
+
+let lastTime = performance.now();
+function loop(now) {
+  const dt = (now - lastTime) / 1000;
+  lastTime = now;
+  if (isSequencingHours) {
+    sequenceProgress += dt * 0.4;
+    if (sequenceProgress >= 1.0) {
+      sequenceProgress = 0;
+      selectedHour = (selectedHour + 1) % 24;
+      isExactNowMode = false;
+      updateUI();
+    }
+  }
+  liveCanvas.render(now);
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+
+// ===================== DATOS POR LOCALIDAD Y PANEL =====================
+async function fetchWeatherData() {
+  const d = datePicker.value;
+  try {
+    await Promise.all(localidades.map(async (loc) => {
+      const url = `https://api.open-meteo.com/v1/forecast?latitude=${loc.lat}&longitude=${loc.lon}&hourly=temperature_2m,precipitation,cloud_cover,wind_gusts_10m,wind_direction_10m&timezone=America%2FArgentina%2FBuenos_Aires&start_date=${d}&end_date=${d}`;
+      const res = await fetch(url);
+      const data = await res.json();
+      loc.weather = data.hourly;
+    }));
+    buildTimeline();
+    updateUI();
+  } catch (e) { console.error('Error consultando clima:', e); }
+}
+
+const rainColor = r => r >= 8 ? '#d500f9' : r >= 4 ? '#ff1744' : r >= 1.5 ? '#ffea00' : r >= 0.5 ? '#00e676' : '#00e5ff';
+
+function buildTimeline() {
+  timelineContainer.innerHTML = '';
+  const activeLoc = localidades[activeLocIndex];
+  if (!activeLoc || !activeLoc.weather) return;
+  const weatherHourly = activeLoc.weather;
+
+  for (let h = 0; h < 24; h++) {
+    const rain = weatherHourly.precipitation[h] || 0, cloud = weatherHourly.cloud_cover[h] || 0;
+    const bar = document.createElement('div');
+    bar.className = 'rain-bar' + (h === selectedHour ? ' selected' : '');
+    if (rain >= 0.1) {
+      bar.style.height = `${Math.min(100, Math.max(25, (rain / 4) * 100))}%`;
+      bar.style.background = rainColor(rain);
+      bar.title = `${activeLoc.name} (${pad(h)}:00 hs) -> Precipitación: ${rain} mm`;
+    } else {
+      bar.style.height = `${Math.max(10, (cloud / 100) * 35)}%`;
+      bar.style.background = cloud > 50 ? '#64748b' : '#1e293b';
+      bar.title = `${activeLoc.name} (${pad(h)}:00 hs) -> Sin lluvia (Nubes: ${cloud}%)`;
+    }
+    bar.onclick = () => { stopHourSequence(); selectedHour = h; isExactNowMode = false; updateUI(); };
+    timelineContainer.appendChild(bar);
+  }
+}
+
+function updateUI() {
+  const h = Math.floor(selectedHour) % 24, nowRef = new Date(), todayStr = getLocalDateString(nowRef), dv = datePicker.value;
+  hourLabel.innerText = (isExactNowMode && dv === todayStr && h === nowRef.getHours())
+    ? `${pad(h)}:${pad(nowRef.getMinutes())} hs (Ahora)` : `${pad(h)}:00 hs`;
+  hourSlider.value = h;
+
+  modePill.className = 'mode-pill';
+  if (dv === todayStr && h === nowRef.getHours()) { modePill.classList.add('pill-now'); modePill.innerText = '● AHORA EN VIVO'; }
+  else if (dv < todayStr || (dv === todayStr && h < nowRef.getHours())) { modePill.classList.add('pill-past'); modePill.innerText = '⏪ PASADO'; }
+  else { modePill.classList.add('pill-future'); modePill.innerText = '🔮 PRONÓSTICO'; }
+
+  Array.from(timelineContainer.children).forEach((el, i) => el.classList.toggle('selected', i === h));
+
+  const activeLoc = localidades[activeLocIndex];
+  if (!activeLoc || !activeLoc.weather) return;
+  const weatherHourly = activeLoc.weather;
+
+  const rain = weatherHourly.precipitation[h] ?? 0, cloud = weatherHourly.cloud_cover[h] ?? 0;
+  const wind = weatherHourly.wind_gusts_10m[h] ?? 0, temp = weatherHourly.temperature_2m[h] ?? '--';
+  $('val-rain').innerText = `${rain} mm`; $('val-cloud').innerText = `${cloud} %`;
+  $('val-wind').innerText = `${wind} km/h`;
+  $('point-title').innerText = `📍 ${activeLoc.name}`;
+
+  let icon, title, sub;
+  if (rain >= 8) [icon, title, sub] = ['⛈️', `Lluvia Severa (${rain} mm/h)`, `${activeLoc.name}: Tormenta fuerte y ráfagas de ${wind} km/h`];
+  else if (rain >= 4) [icon, title, sub] = ['⛈️', `Lluvia Fuerte (${rain} mm/h)`, `${activeLoc.name}: Precipitación intensa y viento de ${wind} km/h`];
+  else if (rain >= 1.5) [icon, title, sub] = ['🌧️', `Lluvia Moderada (${rain} mm/h)`, `${activeLoc.name}: Precipitación abundante sobre la zona`];
+  else if (rain >= 0.5) [icon, title, sub] = ['🌧️', `Lluvia Débil (${rain} mm/h)`, `${activeLoc.name}: Precipitación constante (${cloud}% nubes)`];
+  else if (rain >= 0.1) [icon, title, sub] = ['🌦️', `Llovizna (${rain} mm/h)`, `${activeLoc.name}: Llovizna muy fina y dispersa`];
+  else if (cloud >= 75) [icon, title, sub] = ['☁️', `Cielo Nublado (${cloud}% nubes)`, `${activeLoc.name}: Cubierto, sin precipitaciones`];
+  else if (cloud >= 30) [icon, title, sub] = ['⛅', `Parcialmente Nublado (${cloud}% nubes)`, `${activeLoc.name}: Nubes dispersas y viento de ${wind} km/h`];
+  else [icon, title, sub] = [h >= 7 && h <= 19 ? '☀️' : '🌙', `Cielo Despejado (${cloud}% nubes)`, `${activeLoc.name}: Tiempo estable, viento a ${wind} km/h`];
+
+  $('phenom-icon').innerText = icon;
+  $('phenom-title').innerText = title;
+  $('phenom-sub').innerText = sub;
+  $('phenom-temp').innerText = `${temp} °C`;
+}
+
+window.toggleAnimState = () => { isAnimEnabled = $('chk-anim').checked; };
+
+window.toggleGeojsonState = () => {
+  if (!localidadesLayer) return;
+  if ($('chk-geojson').checked) localidadesLayer.addTo(map); else map.removeLayer(localidadesLayer);
+};
+
+window.toggleSoundState = () => {
+  isSoundEnabled = $('chk-sound').checked;
+  if (isSoundEnabled) {
+    liveCanvas.strike();
+    try { playThunder(0.6); } catch (e) { console.error('Audio bloqueado:', e); } // Rayo + trueno de prueba al activarlo
+  }
+};
+
+function stopHourSequence() {
+  isSequencingHours = false;
+  sequenceProgress = 0;
+  btnSeq.classList.remove('playing');
+  btnSeq.innerText = '▶ Recorrer Horas Automáticamente';
+}
+
+window.toggleHourSequence = () => {
+  if (isSequencingHours) return stopHourSequence();
+  isSequencingHours = true;
+  isExactNowMode = false;
+  btnSeq.classList.add('playing');
+  btnSeq.innerText = '⏸ Detener Recorrido de Horas';
+};
+
+window.jumpToNow = () => {
+  stopHourSequence();
+  const n = new Date();
+  datePicker.value = getLocalDateString(n);
+  selectedHour = n.getHours();
+  isExactNowMode = true;
+  fetchWeatherData();
+};
+
+window.jumpToTomorrow = () => {
+  stopHourSequence();
+  const tom = new Date();
+  tom.setDate(tom.getDate() + 1);
+  datePicker.value = getLocalDateString(tom);
+  selectedHour = 12;
+  isExactNowMode = false;
+  fetchWeatherData();
+};
+
+window.stepHours = delta => {
+  stopHourSequence();
+  isExactNowMode = false;
+  selectedHour = (selectedHour + delta + 24) % 24;
+  updateUI();
+};
+
+hourSlider.addEventListener('input', e => { stopHourSequence(); isExactNowMode = false; selectedHour = parseInt(e.target.value, 10); updateUI(); });
+datePicker.addEventListener('change', () => { stopHourSequence(); isExactNowMode = false; fetchWeatherData(); });
+
+map.on('click', e => {
+  stopHourSequence();
+  let closestIdx = 0, minDist = Infinity;
+  localidades.forEach((loc, idx) => {
+    const dist = Math.hypot(loc.lat - e.latlng.lat, loc.lon - e.latlng.lng);
+    if (dist < minDist) { minDist = dist; closestIdx = idx; }
+  });
+  activeLocIndex = closestIdx;
+  activeMarker.setLatLng([localidades[closestIdx].lat, localidades[closestIdx].lon]);
+  buildTimeline();
+  updateUI();
+});
+
+fetchWeatherData();
+</script>
+</body>
+</html>
