@@ -11,6 +11,11 @@
     #map { height: 100vh; width: 100vw; position: absolute; top: 0; left: 0; }
     .osm-dark-tiles { filter: invert(100%) hue-rotate(180deg) brightness(95%) contrast(90%); }
 
+    /* Efecto Azul Marino Neón con resplandor para que contraste sobre la lluvia y el fondo oscuro */
+    .neon-navy-border {
+      filter: drop-shadow(0 0 3px #3b82f6) drop-shadow(0 0 7px #1d4ed8);
+    }
+
     /* Título compacto, centrado en el espacio libre de la izquierda */
     .top-title-banner {
       position: absolute; top: 15px; left: calc((100vw - 400px) / 2); transform: translateX(-50%);
@@ -31,6 +36,8 @@
       color: #f1f5f9; padding: 3px 8px; border-radius: 6px; font-size: 11.5px;
       font-weight: 600; white-space: nowrap; box-shadow: 0 3px 8px rgba(0,0,0,.6);
       cursor: pointer; transition: all .2s;
+      transform: translate(-50%, -50%);
+      display: inline-block;
     }
     .loc-label:hover { background: #0284c7; border-color: #38bdf8; }
 
@@ -152,14 +159,14 @@ let isAnimEnabled = true, isSequencingHours = false, sequenceProgress = 0;
 let isSoundEnabled = false, audioCtx = null, localidadesLayer = null;
 let activeLocIndex = 0;
 
-// Las 6 localidades de Moreno con sub-celdas para que se fundan en un bloque continuo o actúen por separado
+// Coordenadas fijas y exactas dentro de cada localidad (Moreno Centro clavado en el casco céntrico)
 const localidades = [
-  { name: "Moreno Centro",     lat: -34.650, lon: -58.790, weather: null, puffs: [{dLat: 0, dLon: 0, r: 8.0, ph: 0.1}, {dLat: 0.018, dLon: -0.018, r: 7.0, ph: 1.5}] },
-  { name: "Paso del Rey",      lat: -34.656, lon: -58.761, weather: null, puffs: [{dLat: 0, dLon: 0, r: 7.6, ph: 0.8}, {dLat: 0.015, dLon: -0.015, r: 6.6, ph: 2.2}] },
-  { name: "La Reja",           lat: -34.639, lon: -58.828, weather: null, puffs: [{dLat: 0, dLon: 0, r: 8.0, ph: 1.9}, {dLat: 0.020, dLon: 0.015,  r: 7.0, ph: 3.1}] },
-  { name: "Francisco Álvarez", lat: -34.609, lon: -58.869, weather: null, puffs: [{dLat: 0, dLon: 0, r: 8.4, ph: 2.7}, {dLat: 0.018, dLon: 0.025,  r: 7.4, ph: 4.0}] },
-  { name: "Trujui",            lat: -34.588, lon: -58.758, weather: null, puffs: [{dLat: 0, dLon: 0, r: 8.2, ph: 3.6}, {dLat: -0.018, dLon: -0.022, r: 7.2, ph: 5.2}] },
-  { name: "Cuartel V",         lat: -34.539, lon: -58.804, weather: null, puffs: [{dLat: 0, dLon: 0, r: 9.0, ph: 4.5}, {dLat: -0.025, dLon: -0.015, r: 7.8, ph: 0.4}] }
+  { name: "Moreno Centro",     lat: -34.6428, lon: -58.7858, marker: null, weather: null, puffs: [{dLat: 0, dLon: 0, r: 8.0, ph: 0.1}, {dLat: 0.018, dLon: -0.018, r: 7.0, ph: 1.5}] },
+  { name: "Paso del Rey",      lat: -34.633, lon: -58.754, marker: null, weather: null, puffs: [{dLat: 0, dLon: 0, r: 7.6, ph: 0.8}, {dLat: 0.015, dLon: -0.015, r: 6.6, ph: 2.2}] },
+  { name: "La Reja",           lat: -34.636, lon: -58.828, marker: null, weather: null, puffs: [{dLat: 0, dLon: 0, r: 8.0, ph: 1.9}, {dLat: 0.020, dLon: 0.015,  r: 7.0, ph: 3.1}] },
+  { name: "Francisco Álvarez", lat: -34.608, lon: -58.855, marker: null, weather: null, puffs: [{dLat: 0, dLon: 0, r: 8.4, ph: 2.7}, {dLat: 0.018, dLon: 0.025,  r: 7.4, ph: 4.0}] },
+  { name: "Trujui",            lat: -34.586, lon: -58.752, marker: null, weather: null, puffs: [{dLat: 0, dLon: 0, r: 8.2, ph: 3.6}, {dLat: -0.018, dLon: -0.022, r: 7.2, ph: 5.2}] },
+  { name: "Cuartel V",         lat: -34.568, lon: -58.808, marker: null, weather: null, puffs: [{dLat: 0, dLon: 0, r: 9.0, ph: 4.5}, {dLat: -0.025, dLon: -0.015, r: 7.8, ph: 0.4}] }
 ];
 
 const datePicker = $('date-picker'), hourSlider = $('hour-slider'), hourLabel = $('hour-label');
@@ -167,24 +174,26 @@ const modePill = $('time-mode-pill'), timelineContainer = $('rain-timeline'), bt
 datePicker.value = getLocalDateString(initialNow);
 hourSlider.value = selectedHour;
 
-// Encuadre y zoom exactos desplazados a la izquierda y abajo
 const map = L.map('map', { center: [-34.590, -58.750], zoom: 12.45, minZoom: 9, maxZoom: 17 });
+
+// Panel propio para el límite de localidades, por encima del canvas (overlayPane = 400, marcadores = 600).
+// Para que vuelva a quedar detrás de nubes y lluvia, cambiá 450 por 350.
+map.createPane('localidadesPane');
+map.getPane('localidadesPane').style.zIndex = 450;
 
 L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { className: 'osm-dark-tiles', attribution: '&copy; OpenStreetMap', maxZoom: 19 }).addTo(map);
 
-fetch('localidades_moreno.geojson')
-  .then(res => { if (!res.ok) throw new Error('No se pudo cargar localidades_moreno.geojson'); return res.json(); })
-  .then(data => {
-    localidadesLayer = L.geoJSON(data, { style: { color: '#38bdf8', weight: 2.2, opacity: 0.9, fill: false, fillOpacity: 0 }, interactive: false });
-    if ($('chk-geojson').checked) localidadesLayer.addTo(map);
-  })
-  .catch(err => console.warn('Aviso GeoJSON:', err));
+const activeMarker = L.circleMarker([localidades[0].lat, localidades[0].lon], {
+  radius: 8, fillColor: '#38bdf8', color: '#ffffff', weight: 2.5, fillOpacity: 1
+}).addTo(map);
 
 localidades.forEach((loc, idx) => {
   const marker = L.marker([loc.lat, loc.lon], {
-    icon: L.divIcon({ className: '', html: `<div class="loc-label">📍 ${loc.name}</div>`, iconAnchor: [40, 10] }),
+    icon: L.divIcon({ className: '', html: `<div class="loc-label">📍 ${loc.name}</div>`, iconSize: [0, 0] }),
     interactive: true
   }).addTo(map);
+
+  loc.marker = marker;
 
   marker.on('click', () => {
     activeLocIndex = idx;
@@ -195,11 +204,26 @@ localidades.forEach((loc, idx) => {
   });
 });
 
-const activeMarker = L.circleMarker([localidades[0].lat, localidades[0].lon], {
-  radius: 8, fillColor: '#38bdf8', color: '#ffffff', weight: 2.5, fillOpacity: 1
-}).addTo(map);
+fetch('localidades_moreno.geojson')
+  .then(res => { if (!res.ok) throw new Error('No se pudo cargar localidades_moreno.geojson'); return res.json(); })
+  .then(data => {
+    localidadesLayer = L.geoJSON(data, {
+      pane: 'localidadesPane',
+      style: {
+        color: '#1d4ed8',        // Azul marino eléctrico
+        weight: 2.8,             // Trazo con más presencia
+        opacity: 1,              // 100% nítido
+        fill: false,
+        fillOpacity: 0,
+        className: 'neon-navy-border' // Halo luminoso neón
+      },
+      interactive: false
+    });
+    if ($('chk-geojson').checked) localidadesLayer.addTo(map);
+  })
+  .catch(err => console.warn('Aviso GeoJSON:', err));
 
-// ===================== SONIDO DE TRUENO CON RETRASO FÍSICO (CLAUDE) =====================
+// ===================== SONIDO DE TRUENO CON RETRASO FÍSICO =====================
 function playThunder(delay = 0) {
   if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
   const ac = audioCtx, sr = ac.sampleRate;
@@ -209,7 +233,6 @@ function playThunder(delay = 0) {
   master.gain.value = 0.75;
   master.connect(ac.destination);
 
-  // Rumor grave profundo con oleadas que decaen
   const buf = ac.createBuffer(1, Math.floor(sr * dur), sr), d = buf.getChannelData(0);
   let last = 0;
   for (let i = 0; i < d.length; i++) { last = (last + 0.1 * (Math.random() * 2 - 1)) / 1.1; d[i] = last * 3.5; }
@@ -231,7 +254,6 @@ function playThunder(delay = 0) {
   rumble.connect(lp); lp.connect(g); g.connect(master);
   rumble.start(t0);
 
-  // Golpe seco inicial ("crac")
   const nb = ac.createBuffer(1, Math.floor(sr * 0.25), sr), nd = nb.getChannelData(0);
   for (let i = 0; i < nd.length; i++) nd[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / nd.length, 3);
   const crack = ac.createBufferSource();
@@ -245,7 +267,6 @@ function playThunder(delay = 0) {
   crack.start(t0);
 }
 
-// Primero cae el rayo visual y después llega el sonido del trueno con retraso
 function triggerLightningAndThunder() {
   const flash = $('flash-overlay');
   flash.classList.add('flash-active');
@@ -256,13 +277,11 @@ function triggerLightningAndThunder() {
 }
 
 // ===================== MOTOR DE ANIMACIÓN UNIFICADO =====================
-// Viento: partículas con estela larga y suave (estilo Ventusky)
 const windParticles = Array.from({ length: 240 }, () => {
   const x = Math.random(), y = Math.random();
   return { x, y, px: x, py: y, speed: 0.7 + Math.random() * 0.5, age: Math.floor(Math.random() * 100), maxAge: 70 + Math.floor(Math.random() * 60) };
 });
 
-// Lluvia: 800 gotas dinámicas con umbral 'u' para que cuando llueva moderado/fuerte se vea una cortina bien abundante
 const rainDrops = Array.from({ length: 800 }, () => ({
   x: Math.random(),
   y: Math.random(),
@@ -357,7 +376,7 @@ const LiveCanvasLayer = L.Layer.extend({
     const vxBase = Math.sin(baseRad);
     const vyBase = -Math.cos(baseRad);
 
-    // 1. NUBES FLUIDAS
+    // 1. NUBES FLUIDAS (Intactas tal como estaban)
     locStates.forEach((st, idx) => {
       if (st.cloud > 15) {
         const alpha = Math.min(0.42, (st.cloud / 100) * 0.38);
@@ -422,7 +441,6 @@ const LiveCanvasLayer = L.Layer.extend({
       });
     });
 
-    // Disparador inteligente de rayos según intensidad de tormenta
     if (maxRain < 1.5) nextBolt = 0;
     else if (!nextBolt) nextBolt = ts + 1800 + Math.random() * 3000;
     else if (ts > nextBolt) {
@@ -459,7 +477,7 @@ const LiveCanvasLayer = L.Layer.extend({
     tCtx.stroke();
     ctx.drawImage(this._trailCanvas, 0, 0);
 
-    // 4. LLUVIA Y LLOVIZNA (Sin estela infinita, con 2 cuerpos 'head/tail' y gran densidad en lluvia moderada/fuerte)
+    // 4. LLUVIA Y LLOVIZNA
     if (maxRain >= 0.1) {
       const tail = new Path2D(), head = new Path2D(), mist = new Path2D();
       const slant = Math.max(-0.45, Math.min(0.45, (vxBase * avgWindSpeed) / 85));
@@ -467,7 +485,6 @@ const LiveCanvasLayer = L.Layer.extend({
       for (const d of rainDrops) {
         const px = d.x * W, py = d.y * H;
 
-        // Buscamos cuánta lluvia hay en la posición exacta de esta gota
         let localRain = 0;
         for (let k = 0; k < locStates.length; k++) {
           const st = locStates[k];
@@ -494,10 +511,9 @@ const LiveCanvasLayer = L.Layer.extend({
 
         if (localRain < 0.1) continue;
 
-        // Cantidad de gotas visibles: poquitas en llovizna, muchísimas en moderada (1.5+) y fuerte (4.0+)
         const activeQuota = heavy
           ? (localRain >= 4.0 ? 0.98 : localRain >= 1.5 ? 0.78 : 0.42)
-          : 0.08; // Llovizna: solo el 8% de las gotas activas
+          : 0.08;
 
         if (d.u > activeQuota) continue;
 
@@ -521,7 +537,7 @@ const LiveCanvasLayer = L.Layer.extend({
       ctx.strokeStyle = 'rgba(165,210,255,0.52)'; ctx.lineWidth = 0.95; ctx.stroke(mist);
     }
 
-    // 5. RAYO QUEBRADO CON RAMA (CLAUDE): Cae exactamente sobre una localidad con tormenta fuerte
+    // 5. RAYO QUEBRADO CON RAMA
     if (this._boltPending) {
       this._boltPending = false;
       const stormyLocs = locStates.filter(s => s.rain >= 1.5);
@@ -679,7 +695,7 @@ window.toggleSoundState = () => {
   isSoundEnabled = $('chk-sound').checked;
   if (isSoundEnabled) {
     liveCanvas.strike();
-    try { playThunder(0.6); } catch (e) { console.error('Audio bloqueado:', e); } // Rayo + trueno de prueba al activarlo
+    try { playThunder(0.6); } catch (e) { console.error('Audio bloqueado:', e); }
   }
 };
 
